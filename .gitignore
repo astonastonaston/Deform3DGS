@@ -1,0 +1,12 @@
+*.pyc
+*.pyo
+*.o
+*.so
+*.egg-info
+__pycache__
+*.DS_Store
+build/
+output/
+reconstruct/
+
+

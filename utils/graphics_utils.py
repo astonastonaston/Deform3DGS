@@ -71,6 +71,17 @@ def getProjectionMatrix(znear, zfar, fovX, fovY):
     return P
 
 def getProjectionMatrix2(znear, zfar, K, h, w):
+    # Ensure all inputs are torch tensors of correct dtype
+    if not isinstance(K, torch.Tensor):
+        K = torch.tensor(K, dtype=torch.float32)
+    if not isinstance(h, torch.Tensor):
+        h = torch.tensor(h, dtype=torch.float32)
+    if not isinstance(w, torch.Tensor):
+        w = torch.tensor(w, dtype=torch.float32)
+    if not isinstance(znear, torch.Tensor):
+        znear = torch.tensor(znear, dtype=torch.float32)
+    if not isinstance(zfar, torch.Tensor):
+        zfar = torch.tensor(zfar, dtype=torch.float32)
     near_fx = znear / K[0, 0]
     near_fy = znear / K[1, 1]
     left = - (w - K[0, 2]) * near_fx
