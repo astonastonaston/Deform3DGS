@@ -30,7 +30,7 @@ import cv2
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
-    no_fine, render_test=False, reconstruct=False, crop_size=0):
+    no_fine, render_test=False, reconstruct=False, crop_size=0, args=None):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
@@ -128,7 +128,21 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print('file name:', name)
         reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, crop_size)
 
-def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
+    # === Export per-frame Gaussians ===
+    if hasattr(gaussians, "export_means_and_variances_per_frame") and args.export_per_frame_gaussians:
+        print("Exporting per-frame Gaussian means and covariances...")
+        # times = torch.tensor([view.timestamp for view in views], device="cuda")
+        times = torch.linspace(0, 1, steps=len(views), device="cuda")
+        out_dir = os.path.join(model_path, name, f"ours_{iteration}", "gaussian_stats")
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+        # print(f"View shape {len(views), views}, times shape {times.shape}, out_dir {out_dir}")
+        gaussians.export_means_and_variances_per_frame(times, out_dir, views)
+
+
+
+
+def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool, args: dict):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree, hyperparam)
         scene = Scene(dataset, gaussians, load_iteration=iteration)
@@ -137,11 +151,11 @@ def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : P
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
+            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train, args=args)
         if not skip_test:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20, args=args)
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
+            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20, args=args)
 
 def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, crop_left_size=0):
     import cv2
@@ -166,10 +180,10 @@ def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, crop
             depth_np = depth_np[:, crop_left_size:]
             rgb_np = rgb_np[:-crop_left_size//2, :, :]
             depth_np = depth_np[:-crop_left_size//2, :]
-            
+
         # mask = masks[i_frame]
         # mask = mask.squeeze(0).cpu().numpy()
-        
+
         rgb_new = copy.deepcopy(rgb_np)
         # depth_np[mask == 0] =0
         # rgb_new[mask ==0] = np.asarray([0,0,0]) 
@@ -206,6 +220,7 @@ if __name__ == "__main__":
     parser.add_argument("--reconstruct_test", action="store_true")
     parser.add_argument("--reconstruct_video", action="store_true")
     parser.add_argument("--configs", type=str)
+    parser.add_argument("--export_per_frame_gaussians", action="store_true")
     args = get_combined_args(parser)
     print("Rendering ", args.model_path)
     if args.configs:
@@ -218,4 +233,5 @@ if __name__ == "__main__":
     render_sets(model.extract(args), hyperparam.extract(args), args.iteration, 
         pipeline.extract(args), 
         args.skip_train, args.skip_test, args.skip_video,
-        args.reconstruct_train,args.reconstruct_test,args.reconstruct_video)
+        args.reconstruct_train,args.reconstruct_test,args.reconstruct_video,
+        args=args)

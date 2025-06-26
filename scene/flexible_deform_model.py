@@ -21,6 +21,7 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
+from utils.sh_utils import eval_sh
 from scene.regulation import compute_plane_smoothness
 from typing import Tuple
 
@@ -612,3 +613,70 @@ class GaussianModel:
 
     def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, plane_tv_weight):
         return plane_tv_weight * self._plane_regulation() + time_smoothness_weight * self._time_regulation() + l1_time_planes_weight * self._l1_regulation()
+
+    def export_means_and_variances_per_frame(self, times: torch.Tensor, output_dir: str, views):
+        """
+        Export the deformed means and covariance matrices of the Gaussians at each frame.
+
+        Args:
+            times (torch.Tensor): 1D tensor of timesteps (e.g., torch.linspace(0, 1, N)).
+            output_dir (str): Directory to save output .npz files for each frame.
+        """
+        import os
+        mkdir_p(output_dir)
+        
+        means_list = []
+        cov_list = []
+        
+        for i, t in enumerate(times):
+            t = t.to(self._xyz.device)
+            
+            # Deform current xyz, scale, and rotation
+            # print("input shapes - xyz: {}, scaling: {}, rotation: {}, t: {}".format(
+            #     self._xyz.shape, self._scaling.shape, self._rotation.shape, t.shape))
+            deformed_means, deformed_scales, deformed_rots = self.deformation(
+                self._xyz.detach().clone(),
+                self._scaling.detach().clone(),
+                self._rotation.detach().clone(),
+                t
+            )
+            opacity = self._opacity
+            deformed_scales = self.scaling_activation(deformed_scales)
+            deformed_rots = self.rotation_activation(deformed_rots)
+            opacity = self.opacity_activation(opacity)
+
+            # Compute L matrix
+            L = build_scaling_rotation(deformed_scales, deformed_rots)
+            cov = torch.bmm(L, L.transpose(1, 2))  # [N, 3, 3]
+
+            # compute colors
+            colors_precomp = None
+            viewpoint_camera = views[i]
+            shs_view = self.get_features.transpose(1, 2).view(-1, 3, (self.max_sh_degree+1)**2)
+            dir_pp = (self.get_xyz - viewpoint_camera.camera_center.cuda().repeat(self.get_features.shape[0], 1))
+            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+            sh2rgb = eval_sh(self.active_sh_degree, shs_view, dir_pp_normalized)
+            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+
+            # Move to CPU and convert to NumPy
+            means_np = deformed_means.detach().cpu().numpy()
+            cov_np = cov.detach().cpu().numpy()
+            opacity = opacity.detach().cpu().numpy()
+            deformed_scales = deformed_scales.detach().cpu().numpy()
+            deformed_rots = deformed_rots.detach().cpu().numpy()
+            colors_precomp = colors_precomp.cpu().numpy()
+
+            
+            # Save to file
+            np.savez_compressed(os.path.join(output_dir, f"frame_{i:04d}.npz"),
+                                means=means_np, covariances=cov_np, opacity=opacity,
+                                scales=deformed_scales, rotations=deformed_rots,
+                                colors=colors_precomp, time=t.item()
+                            )
+            print(f"[Frame {i}] Exported to {os.path.join(output_dir, f'frame_{i:04d}.npz')}")
+
+            means_list.append(means_np)
+            cov_list.append(cov_np)
+
+        print(f"Exported {len(times)} frames of Gaussian mean and covariance data to {output_dir}")
+        return 0

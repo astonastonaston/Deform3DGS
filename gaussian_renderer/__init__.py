@@ -72,7 +72,10 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         rotations = pc._rotation
     deformation_point = pc._deformation_table
     
-
+    # print("Deformation point shape is ", deformation_point.shape)
+    # print("Deformation shapes are: mean {} scale {} rotation {}".format(means3D.shape, scales.shape, rotations.shape))
+    # print("Deformation timestep: {}".format(ori_time))
+    # print(deformation_point.shape, deformation_point, sum(deformation_point))
     means3D_deform, scales_deform, rotations_deform = pc.deformation(means3D[deformation_point], scales[deformation_point], 
                                                                          rotations[deformation_point],
                                                                          ori_time)
@@ -110,12 +113,21 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
             dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+            # shs = pc.get_features
         else:
             shs = pc.get_features
     else:
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
+    # print("Rendering with {} Gaussians".format(means3D_final.shape[0]))
+    # print("Rendering with {} visible Gaussians".format((opacity_final > 0).sum().item()))
+    # print("means3D color, scale, rot, opa shape is ", means3D_final.shape, 
+    # colors_precomp.shape, 
+    # scales_final.shape, 
+    # rotations_final.shape, 
+    # opacity_final.shape)
+        print(f"View shape {len(views), views}, times shape {times.shape}, out_dir {out_dir}")
     rendered_image, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
@@ -132,4 +144,10 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
             "depth": depth,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,
-            "radii": radii,}
+            "radii": radii,
+            "colors": colors_precomp,
+            "means3D": means3D_final,
+            "means2D": means2D,
+            "opacity": opacity,
+            "scales": scales_final,
+            "rotations": rotations_final,}
